@@ -1,0 +1,61 @@
+
+Updated: 
+8/25/26
+
+
+Google Doc Link:
+https://docs.google.com/document/d/1YnR5dxOBbEXsr5sdYgW7CWnNq7kQIGkrND1bMviW8zs/edit?tab=t.0
+
+
+
+----------------------------------------------------------------
+Project Git Notes                                              |
+----------------------------------------------------------------
+---Before starting work---                                     |
+    -Open the project                                          |
+    -Check the repository                                      |
+        git status                                             |                         
+    -Download the team’s latest work:                          |
+        git pull --rebase origin main                          |
+---After editing and testing---                                |
+    -See which files changed                                   |
+        git status                                             |                                
+    -Review code changes                                       |
+        git diff                                               |
+    -Stage specific files                                      |
+        git add game.lua                                       |
+        git add world.lua                                      |
+        git add Mole_Left_Right_Sheet.png                      |
+    -Multiple files can be staged together                     |
+        git add game.lua world.lua audio.lua                   |
+    -Commit the changes                                        |
+        git commit -m "Describe the completed change"          |
+    -Download any changes made by teammates since work began   |
+        git pull --rebase origin main                          |
+    -Upload the commit to GitHub                               |
+        git push origin main                                   |
+----------------------------------------------------------------
+
+
+
+
+## Controls
+
+| Playdate control | Action |
+|---|---|
+| D-pad Left | Move and dig left |
+| D-pad Right | Move and dig right |
+| D-pad Down | Move and dig downward |
+| A button | Start the game |
+| A button or D-pad Down | Restart after game over |
+
+
+
+## Technology
+
+The project uses:
+
+- Playdate SDK
+- Playdate Lua API
+- Lua
+- Visual Studio Code

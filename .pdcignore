@@ -1,0 +1,11 @@
+.git
+.sentry-native
+.gitattributes
+.gitignore
+.pdcignore
+.vscode
+README.md
+Notes
+build
+build-playdate.ps1
+run-simulator.ps1

@@ -7,9 +7,9 @@ You only have 30 seconds, so choose your route quickly and dig as deep as possib
 
 ## Game Jam Project
 
-**Tunnel Vision!** was created as a game jam project by students learning game development, Lua, Git, GitHub, and the Playdate SDK.
+**Tunnel Vision!** was created as a game jam project by students learning game development.
 
-The goals of the project are to:
+The goals of this project are to:
 - Learn the fundamentals of Lua programming
 - Learn how Playdate games are structured
 - Build and test a game on the Playdate Simulator
@@ -56,6 +56,28 @@ The project uses:
 - Playdate SDK
 - Playdate Lua API
 - Lua
+- Visual Studio Code
+- Aseprite
+
+## Running the Game
+
+Install the Playdate SDK first. On Windows, set `PLAYDATE_SDK_PATH` to your SDK folder, or add the SDK `bin` folder to your `PATH`.
+
+To build the game:
+
+```powershell
+.\build-playdate.ps1
+```
+
+To build and open it in the Playdate Simulator:
+
+```powershell
+.\run-simulator.ps1
+```
+
+The compiled game is created at `build\MoleDown.pdx`.
+
+To run it on a physical Playdate, open `build\MoleDown.pdx` in the Simulator, connect and unlock the Playdate, then use the Simulator device install/upload option.
 
 ## What Is Playdate?
 
@@ -75,9 +97,3 @@ This project uses the Lua portion of the Playdate SDK.
 ## What Is Lua?
 
 Lua is a small, lightweight programming language commonly embedded in games and applications.
-
-- Project Updates -
-Emma:
-Rossalind:
-Sydney:
-Wills: 8/25/26 @ 14:30

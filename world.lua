@@ -80,7 +80,7 @@ function World:makeWorm(chunkIndex)
 end
 
 function World:generateChunk()
-    self.chunkCount += 1
+    self.chunkCount = self.chunkCount + 1
     local chunkIndex = self.chunkCount
     local template = chunkTemplates[((chunkIndex - 1) % #chunkTemplates) + 1]
     local baseRow = 3 + (chunkIndex - 1) * CHUNK_HEIGHT

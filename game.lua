@@ -88,11 +88,11 @@ function Game:collectAtPlayer()
     end
 
     if item.kind == "worm" then
-        self.timeLeft += item.seconds
+        self.timeLeft = self.timeLeft + item.seconds
         self:addEffect(item.label, self.col, self.row)
         self.audio:worm(item.seconds)
     else
-        self.score += item.value
+        self.score = self.score + item.value
         self:addEffect(item.label, self.col, self.row)
         self.audio:treasure(item.kind)
     end
@@ -153,7 +153,7 @@ end
 function Game:updateEffects(dt)
     for i = #self.effects, 1, -1 do
         local effect = self.effects[i]
-        effect.age += dt
+        effect.age = effect.age + dt
         if effect.age > 0.75 then
             table.remove(self.effects, i)
         end
@@ -161,10 +161,10 @@ function Game:updateEffects(dt)
 
     for i = #self.particles, 1, -1 do
         local particle = self.particles[i]
-        particle.age += dt
-        particle.x += particle.vx * dt
-        particle.y += particle.vy * dt
-        particle.vy += 90 * dt
+        particle.age = particle.age + dt
+        particle.x = particle.x + particle.vx * dt
+        particle.y = particle.y + particle.vy * dt
+        particle.vy = particle.vy + 90 * dt
         if particle.age > particle.life then
             table.remove(self.particles, i)
         end
@@ -175,7 +175,7 @@ function Game:update()
     local nowMs = playdate.getCurrentTimeMilliseconds()
     local dt = clamp((nowMs - self.lastMs) / 1000, 0, 0.1)
     self.lastMs = nowMs
-    self.titleBob += dt
+    self.titleBob = self.titleBob + dt
 
     if self.state == "title" then
         if playdate.buttonJustPressed(playdate.kButtonA)
@@ -207,7 +207,7 @@ function Game:update()
     self:updateEffects(dt)
 
     local targetCamera = math.max(0, self.visualY - 132)
-    self.cameraY += (targetCamera - self.cameraY) * math.min(1, dt * 8)
+    self.cameraY = self.cameraY + (targetCamera - self.cameraY) * math.min(1, dt * 8)
 
     if self.timeLeft <= 0 then
         self.state = "gameOver"
