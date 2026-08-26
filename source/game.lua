@@ -1,45 +1,80 @@
 local gfx = playdate.graphics
 
--- Game controls the main game state, player movement, scoring, and drawing.
+local moleDownFrames = assert(gfx.imagetable.new("assets/Mole_Front_Dig_Down"))
+local moleSideFrames = assert(gfx.imagetable.new("assets/Mole_Left_Right_Sheet"))
+
 Game = {}
 Game.__index = Game
 
--- Gameplay timing constants.
 local START_TIME = 30
 local MOVE_DURATION = 0.09
 local MOVE_REPEAT_MS = 115
+local MOLE_DOWN_SCALE = 1.25
+local MOLE_SIDE_SCALE = 1
+local MOLE_DOWN_Y_OFFSET = -2
+local MOLE_SIDE_Y_OFFSET = -5
+local MOVE_SPEED_DURATION = 10
+local MOVE_SPEED_MULTIPLIER = 1.5
+local NORMAL_CRANK_THRESHOLD = 10
 
--- Keeps a number between a minimum and maximum value.
+local function worldCellKey(col, row)
+    return col .. ":" .. row
+end
+
 local function clamp(value, low, high)
     return math.max(low, math.min(high, value))
 end
 
--- Makes movement start quickly and settle smoothly at the end.
 local function easeOut(t)
     return 1 - (1 - t) * (1 - t)
 end
 
--- Draws text centered horizontally on the Playdate screen.
+local function drawImageCenteredScaled(image, x, y, scale, yOffset)
+    local width, height = image:getSize()
+    local drawX = math.floor(x - width * scale / 2)
+    local drawY = math.floor(y - height * scale / 2 + yOffset)
+    if scale == 1 then
+        image:draw(drawX, drawY)
+    else
+        image:drawScaled(drawX, drawY, scale)
+    end
+end
+
 local function centerText(text, y)
     local width = gfx.getTextSize(text)
     gfx.drawText(text, 200 - width / 2, y)
 end
 
--- Creates the game object and starts it on the title screen.
+local function rightText(text, rightX, y)
+    local width = gfx.getTextSize(text)
+    gfx.drawText(text, rightX - width, y)
+end
+
 function Game.new()
     local self = setmetatable({}, Game)
     self.audio = Audio.new()
     self.world = World.new()
+    local saveData = playdate.datastore.read("save")
+    self.highScore = type(saveData) == "table" and saveData.highScore or 0
     self.state = "title"
     self.lastMs = playdate.getCurrentTimeMilliseconds()
     self.titleBob = 0
     self.effects = {}
     self.particles = {}
+    self.combatEnemy = nil
     self.cameraY = 0
     return self
 end
 
--- Resets all values for a fresh round and switches into gameplay.
+function Game:saveHighScore()
+    if self.score <= self.highScore then
+        return
+    end
+
+    self.highScore = self.score
+    playdate.datastore.write({ highScore = self.highScore }, "save")
+end
+
 function Game:start()
     self.world:reset()
     self.state = "playing"
@@ -56,15 +91,19 @@ function Game:start()
     self.moveToX = self.visualX
     self.moveToY = self.visualY
     self.moveProgress = 1
+    self.currentMoveDuration = MOVE_DURATION
     self.nextMoveMs = 0
     self.cameraY = 0
     self.effects = {}
     self.particles = {}
+    self.combatEnemy = nil
+    self.moveSpeedBuff = 0
+    self.strengthBuff = 0
+    self.strengthBuffTimer = 0
     self.lastWarningSecond = 6
     self.lastMs = playdate.getCurrentTimeMilliseconds()
 end
 
--- Adds floating text for score and time pickups.
 function Game:addEffect(text, col, row)
     table.insert(self.effects, {
         text = text,
@@ -74,7 +113,6 @@ function Game:addEffect(text, col, row)
     })
 end
 
--- Creates small dirt particles when the player digs into a new tile.
 function Game:addDigParticles(col, row)
     local cx = (col - 0.5) * World.TILE
     local cy = (row - 0.5) * World.TILE
@@ -90,7 +128,6 @@ function Game:addDigParticles(col, row)
     end
 end
 
--- Checks the player's current tile and applies any item found there.
 function Game:collectAtPlayer()
     local item = self.world:collect(self.col, self.row)
     if not item then
@@ -98,20 +135,96 @@ function Game:collectAtPlayer()
     end
 
     if item.kind == "worm" then
-        self.timeLeft = self.timeLeft + item.seconds
+        self.timeLeft += item.seconds
         self:addEffect(item.label, self.col, self.row)
         self.audio:worm(item.seconds)
+    elseif item.kind == "move_speed" then
+        self.moveSpeedBuff = math.max(
+            self.moveSpeedBuff,
+            item.seconds or MOVE_SPEED_DURATION
+        )
+        self:addEffect(item.label, self.col, self.row)
+        self.audio:powerUp()
+    elseif item.kind == "strength" then
+        self.strengthBuff = math.min(self.strengthBuff + 1, 3)
+        self.strengthBuffTimer = math.max(
+            self.strengthBuffTimer,
+            item.seconds or 10
+        )
+        self:addEffect("POWER x" .. tostring(self.strengthBuff), self.col, self.row)
+        self.audio:powerUp()
     else
-        self.score = self.score + item.value
+        self.score += item.value
         self:addEffect(item.label, self.col, self.row)
         self.audio:treasure(item.kind)
     end
 end
 
--- Attempts to move the player one grid space and handles digging/collecting.
+function Game:checkEnemyCollision()
+    for _, enemy in ipairs(self.world.enemies) do
+        if enemy.col == self.col and enemy.row == self.row then
+            self.combatEnemy = enemy
+            enemy.state = "combat"
+            return true
+        end
+    end
+    return false
+end
+
+function Game:killEnemy(enemy)
+    for i = #self.world.enemies, 1, -1 do
+        if self.world.enemies[i] == enemy then
+            table.remove(self.world.enemies, i)
+            break
+        end
+    end
+
+    self.score += 25
+    self:addEffect("+25", enemy.col, enemy.row)
+
+    local drop = self.world:makeEnemyDrop(enemy)
+    if drop then
+        drop.col = enemy.col
+        drop.row = enemy.row
+        self.world.items[worldCellKey(enemy.col, enemy.row)] = drop
+    end
+
+    self.audio:enemyDefeated()
+    self.combatEnemy = nil
+    self.moveProgress = 1
+    self.visualX = (self.col - 0.5) * World.TILE
+    self.visualY = (self.row - 0.5) * World.TILE
+    self.nextMoveMs = 0
+end
+
+function Game:updateCombat()
+    local enemy = self.combatEnemy
+    if not enemy then
+        return
+    end
+
+    local crankChange = playdate.getCrankChange()
+    if math.abs(crankChange) >= NORMAL_CRANK_THRESHOLD then
+        local damage = 1 + self.strengthBuff
+        enemy.hp -= damage
+        self:addEffect("-" .. tostring(damage), enemy.col, enemy.row)
+        self.audio:combatHit()
+        if enemy.hp <= 0 then
+            self:killEnemy(enemy)
+        end
+    end
+end
+
 function Game:tryMove(deltaCol, deltaRow, direction, nowMs)
     if self.moveProgress < 1 then
         return
+    end
+
+    local moveDuration = MOVE_DURATION
+    local moveRepeat = MOVE_REPEAT_MS
+    if self.moveSpeedBuff > 0 then
+        moveDuration = MOVE_DURATION / MOVE_SPEED_MULTIPLIER
+        moveRepeat = MOVE_REPEAT_MS / MOVE_SPEED_MULTIPLIER
     end
 
     local newCol = self.col + deltaCol
@@ -128,7 +241,8 @@ function Game:tryMove(deltaCol, deltaRow, direction, nowMs)
     self.moveToX = (self.col - 0.5) * World.TILE
     self.moveToY = (self.row - 0.5) * World.TILE
     self.moveProgress = 0
-    self.nextMoveMs = nowMs + MOVE_REPEAT_MS
+    self.currentMoveDuration = moveDuration
+    self.nextMoveMs = nowMs + moveRepeat
 
     if self.world:dig(self.col, self.row) then
         self:addDigParticles(self.col, self.row)
@@ -137,15 +251,20 @@ function Game:tryMove(deltaCol, deltaRow, direction, nowMs)
 
     self.maxDepth = math.max(self.maxDepth, self.row - 3)
     self:collectAtPlayer()
+    self:checkEnemyCollision()
 end
 
--- Reads button input, repeats held movement, and animates between grid cells.
 function Game:updateMovement(dt, nowMs)
     if self.moveProgress < 1 then
-        self.moveProgress = math.min(1, self.moveProgress + dt / MOVE_DURATION)
+        local moveDuration = self.currentMoveDuration or MOVE_DURATION
+        self.moveProgress = math.min(1, self.moveProgress + dt / moveDuration)
         local t = easeOut(self.moveProgress)
         self.visualX = self.moveFromX + (self.moveToX - self.moveFromX) * t
         self.visualY = self.moveFromY + (self.moveToY - self.moveFromY) * t
+    end
+
+    if self.combatEnemy then
+        return
     end
 
     local justLeft = playdate.buttonJustPressed(playdate.kButtonLeft)
@@ -162,11 +281,23 @@ function Game:updateMovement(dt, nowMs)
     end
 end
 
--- Updates floating score text and dirt particles, then removes expired effects.
+function Game:updateBuffs(dt)
+    if self.moveSpeedBuff > 0 then
+        self.moveSpeedBuff = math.max(0, self.moveSpeedBuff - dt)
+    end
+
+    if self.strengthBuffTimer > 0 then
+        self.strengthBuffTimer = math.max(0, self.strengthBuffTimer - dt)
+        if self.strengthBuffTimer <= 0 then
+            self.strengthBuff = 0
+        end
+    end
+end
+
 function Game:updateEffects(dt)
     for i = #self.effects, 1, -1 do
         local effect = self.effects[i]
-        effect.age = effect.age + dt
+        effect.age += dt
         if effect.age > 0.75 then
             table.remove(self.effects, i)
         end
@@ -174,22 +305,21 @@ function Game:updateEffects(dt)
 
     for i = #self.particles, 1, -1 do
         local particle = self.particles[i]
-        particle.age = particle.age + dt
-        particle.x = particle.x + particle.vx * dt
-        particle.y = particle.y + particle.vy * dt
-        particle.vy = particle.vy + 90 * dt
+        particle.age += dt
+        particle.x += particle.vx * dt
+        particle.y += particle.vy * dt
+        particle.vy += 90 * dt
         if particle.age > particle.life then
             table.remove(self.particles, i)
         end
     end
 end
 
--- Updates the game once per frame based on the current state.
 function Game:update()
     local nowMs = playdate.getCurrentTimeMilliseconds()
     local dt = clamp((nowMs - self.lastMs) / 1000, 0, 0.1)
     self.lastMs = nowMs
-    self.titleBob = self.titleBob + dt
+    self.titleBob += dt
 
     if self.state == "title" then
         if playdate.buttonJustPressed(playdate.kButtonA)
@@ -211,6 +341,7 @@ function Game:update()
     end
 
     self.timeLeft = math.max(0, self.timeLeft - dt)
+    self:updateBuffs(dt)
     local warningSecond = math.ceil(self.timeLeft)
     if warningSecond <= 5 and warningSecond < self.lastWarningSecond and warningSecond > 0 then
         self.lastWarningSecond = warningSecond
@@ -218,44 +349,58 @@ function Game:update()
     end
 
     self:updateMovement(dt, nowMs)
+    self.world:updateEnemies(dt)
+    if not self.combatEnemy then
+        self:checkEnemyCollision()
+    end
+    self:updateCombat()
     self:updateEffects(dt)
 
     local targetCamera = math.max(0, self.visualY - 132)
-    self.cameraY = self.cameraY + (targetCamera - self.cameraY) * math.min(1, dt * 8)
+    self.cameraY += (targetCamera - self.cameraY) * math.min(1, dt * 8)
 
     if self.timeLeft <= 0 then
+        self:saveHighScore()
         self.state = "gameOver"
         self.audio:gameOver()
     end
 end
 
--- Draws the mole body, face, and direction marker at its animated position.
 function Game:drawMole()
     local x = self.visualX
     local y = self.visualY - self.cameraY
     local moving = self.moveProgress < 1
-    local squash = moving and math.sin(self.moveProgress * math.pi) * 2 or 0
 
-    gfx.setColor(gfx.kColorBlack)
-    gfx.fillEllipseInRect(x - 8 - squash, y - 7 + squash / 2, 16 + squash * 2, 15 - squash)
-
-    if self.facing == "left" then
-        gfx.fillPolygon(x - 11 - squash, y, x - 5, y - 5, x - 5, y + 5)
-    elseif self.facing == "right" then
-        gfx.fillPolygon(x + 11 + squash, y, x + 5, y - 5, x + 5, y + 5)
-    else
-        gfx.fillPolygon(x, y + 11, x - 5, y + 5, x + 5, y + 5)
-    end
-
-    gfx.setColor(gfx.kColorWhite)
-    local eyeX = self.facing == "left" and x - 3 or self.facing == "right" and x + 3 or x - 3
-    gfx.fillCircleAtPoint(eyeX, y - 2, 2)
     if self.facing == "down" then
-        gfx.fillCircleAtPoint(x + 3, y - 2, 2)
+        local frameIndex = 1
+        if moving then
+            frameIndex = math.min(4, math.floor(self.moveProgress * 4) + 1)
+        end
+        drawImageCenteredScaled(
+            moleDownFrames:getImage(frameIndex),
+            x,
+            y,
+            MOLE_DOWN_SCALE,
+            MOLE_DOWN_Y_OFFSET
+        )
+        return
     end
+
+    local animationFrame = moving
+        and (math.floor(playdate.getCurrentTimeMilliseconds() / 70) % 8)
+        or 0
+    local frameIndex = self.facing == "left"
+        and (25 + animationFrame)
+        or (16 - animationFrame)
+    drawImageCenteredScaled(
+        moleSideFrames:getImage(frameIndex),
+        x,
+        y,
+        MOLE_SIDE_SCALE,
+        MOLE_SIDE_Y_OFFSET
+    )
 end
 
--- Draws temporary floating text and dirt particles.
 function Game:drawEffects()
     gfx.setColor(gfx.kColorBlack)
     for _, effect in ipairs(self.effects) do
@@ -274,21 +419,47 @@ function Game:drawEffects()
     end
 end
 
--- Draws the score, timer, and depth across the top of the screen.
 function Game:drawHud()
     gfx.setColor(gfx.kColorBlack)
-    gfx.fillRect(0, 0, 400, 27)
-    gfx.setColor(gfx.kColorWhite)
+    gfx.fillRect(0, 0, 400, 43)
+    gfx.setImageDrawMode(gfx.kDrawModeFillWhite)
     gfx.drawText("SCORE " .. tostring(self.score), 8, 6)
-    gfx.drawText("TIME " .. string.format("%02d", math.ceil(self.timeLeft)), 160, 6)
-    gfx.drawText("DEPTH " .. tostring(self.maxDepth) .. "m", 287, 6)
+    rightText("HIGH SCORE " .. tostring(self.highScore), 392, 6)
+    gfx.drawText("TIME " .. string.format("%02d", math.ceil(self.timeLeft)), 8, 23)
+    rightText("DEPTH " .. tostring(self.maxDepth) .. "m", 392, 23)
+    if self.combatEnemy then
+        centerText("CRANK!", 23)
+    end
+    gfx.setImageDrawMode(gfx.kDrawModeCopy)
 
     if self.timeLeft <= 5 and math.floor(self.timeLeft * 5) % 2 == 0 then
-        gfx.drawRect(151, 3, 85, 21)
+        gfx.setColor(gfx.kColorWhite)
+        gfx.drawRect(3, 20, 88, 20)
+    end
+
+    local buffY = 46
+    if self.moveSpeedBuff > 0 then
+        gfx.setColor(gfx.kColorWhite)
+        gfx.fillRoundRect(6, buffY, 74, 16, 3)
+        gfx.setColor(gfx.kColorBlack)
+        gfx.drawRoundRect(6, buffY, 74, 16, 3)
+        gfx.drawText("SPD " .. tostring(math.ceil(self.moveSpeedBuff)), 11, buffY + 2)
+    end
+
+    if self.strengthBuff > 0 then
+        gfx.setColor(gfx.kColorWhite)
+        gfx.fillRoundRect(84, buffY, 104, 16, 3)
+        gfx.setColor(gfx.kColorBlack)
+        gfx.drawRoundRect(84, buffY, 104, 16, 3)
+        gfx.drawText(
+            "PWR x" .. tostring(self.strengthBuff)
+                .. " " .. tostring(math.ceil(self.strengthBuffTimer)),
+            89,
+            buffY + 2
+        )
     end
 end
 
--- Draws the title screen shown before the round starts.
 function Game:drawTitle()
     gfx.setColor(gfx.kColorWhite)
     gfx.fillRect(48, 44, 304, 151)
@@ -297,21 +468,24 @@ function Game:drawTitle()
     gfx.drawRect(48, 44, 304, 151)
     gfx.setLineWidth(1)
 
+    gfx.setColor(gfx.kColorBlack)
+    centerText("HOLEY MOLE-Y!", 54)
+
     local bob = math.sin(self.titleBob * 4) * 3
-    gfx.fillEllipseInRect(178, 61 + bob, 44, 34)
-    gfx.fillPolygon(200, 104 + bob, 190, 88 + bob, 210, 88 + bob)
-    gfx.setColor(gfx.kColorWhite)
-    gfx.fillCircleAtPoint(192, 73 + bob, 3)
-    gfx.fillCircleAtPoint(208, 73 + bob, 3)
+    drawImageCenteredScaled(
+        moleDownFrames:getImage(1),
+        200,
+        89 + bob,
+        2,
+        -4
+    )
 
     gfx.setColor(gfx.kColorBlack)
-    centerText("MOLE DOWN!", 111)
-    centerText("DIG  FIND  GO DEEP", 137)
-    centerText("LEFT / RIGHT / DOWN", 158)
-    centerText("PRESS A OR A DIRECTION", 176)
+    centerText("DIG  FIND  GO DEEP", 115)
+    centerText("LEFT / RIGHT / DOWN", 143)
+    centerText("PRESS A OR A DIRECTION", 169)
 end
 
--- Draws the final score screen after the timer reaches zero.
 function Game:drawGameOver()
     gfx.setColor(gfx.kColorWhite)
     gfx.fillRoundRect(65, 52, 270, 145, 8)
@@ -320,12 +494,12 @@ function Game:drawGameOver()
     gfx.drawRoundRect(65, 52, 270, 145, 8)
     gfx.setLineWidth(1)
     centerText("TIME'S UP!", 70)
-    centerText("SCORE  " .. tostring(self.score), 105)
-    centerText("DEPTH  " .. tostring(self.maxDepth) .. "m", 128)
-    centerText("PRESS A OR DOWN TO RESTART", 164)
+    centerText("SCORE  " .. tostring(self.score), 98)
+    centerText("HIGH SCORE  " .. tostring(self.highScore), 121)
+    centerText("DEPTH  " .. tostring(self.maxDepth) .. "m", 144)
+    centerText("PRESS A OR DOWN TO RESTART", 170)
 end
 
--- Draws the world first, then overlays the correct game screen elements.
 function Game:draw()
     self.world:draw(self.cameraY)
 
@@ -341,8 +515,4 @@ function Game:draw()
     if self.state == "gameOver" then
         self:drawGameOver()
     end
-
-
-
-
 end
