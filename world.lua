@@ -1,12 +1,15 @@
 local gfx = playdate.graphics
 
+-- World stores the underground map, dug tiles, and collectible items.
 World = {}
 World.__index = World
 
+-- World layout constants.
 local TILE = 20
 local COLS = 20
 local CHUNK_HEIGHT = 8
 
+-- Repeating item layouts used to build the underground as the player digs.
 local chunkTemplates = {
     {
         { col = 6, row = 1, role = "treasure" },
@@ -38,16 +41,19 @@ local chunkTemplates = {
     },
 }
 
+-- Converts a tile position into a table key like "10:3".
 local function cellKey(col, row)
     return col .. ":" .. row
 end
 
+-- Creates a new world and fills it with the starting underground area.
 function World.new()
     local self = setmetatable({}, World)
     self:reset()
     return self
 end
 
+-- Clears dug tiles and items, then creates enough rows for the start of a run.
 function World:reset()
     self.dug = {}
     self.items = {}
@@ -57,6 +63,7 @@ function World:reset()
     self:ensureThroughRow(40)
 end
 
+-- Creates a treasure item, making better rewards more common deeper down.
 function World:makeTreasure(chunkIndex)
     local roll = math.random()
     local diamondChance = math.min(0.08 + chunkIndex * 0.012, 0.30)
@@ -69,6 +76,7 @@ function World:makeTreasure(chunkIndex)
     return { kind = "gem", value = 10, label = "+10" }
 end
 
+-- Creates a worm time bonus, with larger bonuses appearing deeper down.
 function World:makeWorm(chunkIndex)
     local roll = math.random()
     if chunkIndex >= 6 and roll < 0.16 then
@@ -79,6 +87,7 @@ function World:makeWorm(chunkIndex)
     return { kind = "worm", seconds = 2, label = "+2s" }
 end
 
+-- Adds the next underground chunk of treasure and worms.
 function World:generateChunk()
     self.chunkCount = self.chunkCount + 1
     local chunkIndex = self.chunkCount
@@ -96,20 +105,24 @@ function World:generateChunk()
     self.generatedBottom = baseRow + CHUNK_HEIGHT
 end
 
+-- Keeps generating chunks until the requested row exists.
 function World:ensureThroughRow(row)
     while self.generatedBottom < row do
         self:generateChunk()
     end
 end
 
+-- Returns whether a tile is inside the playable underground area.
 function World:isInside(col, row)
     return col >= 1 and col <= COLS and row >= 3
 end
 
+-- Returns whether a tile has already been dug out.
 function World:isDug(col, row)
     return self.dug[cellKey(col, row)] == true
 end
 
+-- Marks a tile as dug and expands the world ahead if needed.
 function World:dig(col, row)
     local key = cellKey(col, row)
     if self.dug[key] then
@@ -120,6 +133,7 @@ function World:dig(col, row)
     return true
 end
 
+-- Removes and returns an item from a tile when the player collects it.
 function World:collect(col, row)
     local key = cellKey(col, row)
     local item = self.items[key]
@@ -127,6 +141,7 @@ function World:collect(col, row)
     return item
 end
 
+-- Draws simple white texture marks inside black dirt tiles.
 local function drawDirtTexture(col, row, x, y)
     gfx.setColor(gfx.kColorWhite)
     local seed = col * 17 + row * 31
@@ -137,6 +152,7 @@ local function drawDirtTexture(col, row, x, y)
     end
 end
 
+-- Draws the correct treasure shape based on the item's kind.
 local function drawTreasure(item, cx, cy)
     gfx.setColor(gfx.kColorWhite)
     if item.kind == "gem" then
@@ -154,6 +170,7 @@ local function drawTreasure(item, cx, cy)
     end
 end
 
+-- Draws a worm, making bigger time bonuses look thicker.
 local function drawWorm(item, cx, cy)
     gfx.setColor(gfx.kColorWhite)
     gfx.setLineWidth(item.seconds >= 10 and 4 or item.seconds >= 5 and 3 or 2)
@@ -164,6 +181,7 @@ local function drawWorm(item, cx, cy)
     gfx.fillCircleAtPoint(cx + 7, cy - 4, 2)
 end
 
+-- Draws visible underground rows, the surface line, and collectible items.
 function World:draw(cameraY)
     local firstRow = math.max(1, math.floor(cameraY / TILE) + 1)
     local lastRow = firstRow + 13
@@ -214,5 +232,6 @@ function World:draw(cameraY)
     end
 end
 
+-- Share world constants with the Game code.
 World.TILE = TILE
 World.COLS = COLS

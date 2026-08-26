@@ -1,25 +1,31 @@
 local gfx = playdate.graphics
 
+-- Game controls the main game state, player movement, scoring, and drawing.
 Game = {}
 Game.__index = Game
 
+-- Gameplay timing constants.
 local START_TIME = 30
 local MOVE_DURATION = 0.09
 local MOVE_REPEAT_MS = 115
 
+-- Keeps a number between a minimum and maximum value.
 local function clamp(value, low, high)
     return math.max(low, math.min(high, value))
 end
 
+-- Makes movement start quickly and settle smoothly at the end.
 local function easeOut(t)
     return 1 - (1 - t) * (1 - t)
 end
 
+-- Draws text centered horizontally on the Playdate screen.
 local function centerText(text, y)
     local width = gfx.getTextSize(text)
     gfx.drawText(text, 200 - width / 2, y)
 end
 
+-- Creates the game object and starts it on the title screen.
 function Game.new()
     local self = setmetatable({}, Game)
     self.audio = Audio.new()
@@ -33,6 +39,7 @@ function Game.new()
     return self
 end
 
+-- Resets all values for a fresh round and switches into gameplay.
 function Game:start()
     self.world:reset()
     self.state = "playing"
@@ -57,6 +64,7 @@ function Game:start()
     self.lastMs = playdate.getCurrentTimeMilliseconds()
 end
 
+-- Adds floating text for score and time pickups.
 function Game:addEffect(text, col, row)
     table.insert(self.effects, {
         text = text,
@@ -66,6 +74,7 @@ function Game:addEffect(text, col, row)
     })
 end
 
+-- Creates small dirt particles when the player digs into a new tile.
 function Game:addDigParticles(col, row)
     local cx = (col - 0.5) * World.TILE
     local cy = (row - 0.5) * World.TILE
@@ -81,6 +90,7 @@ function Game:addDigParticles(col, row)
     end
 end
 
+-- Checks the player's current tile and applies any item found there.
 function Game:collectAtPlayer()
     local item = self.world:collect(self.col, self.row)
     if not item then
@@ -98,6 +108,7 @@ function Game:collectAtPlayer()
     end
 end
 
+-- Attempts to move the player one grid space and handles digging/collecting.
 function Game:tryMove(deltaCol, deltaRow, direction, nowMs)
     if self.moveProgress < 1 then
         return
@@ -128,6 +139,7 @@ function Game:tryMove(deltaCol, deltaRow, direction, nowMs)
     self:collectAtPlayer()
 end
 
+-- Reads button input, repeats held movement, and animates between grid cells.
 function Game:updateMovement(dt, nowMs)
     if self.moveProgress < 1 then
         self.moveProgress = math.min(1, self.moveProgress + dt / MOVE_DURATION)
@@ -150,6 +162,7 @@ function Game:updateMovement(dt, nowMs)
     end
 end
 
+-- Updates floating score text and dirt particles, then removes expired effects.
 function Game:updateEffects(dt)
     for i = #self.effects, 1, -1 do
         local effect = self.effects[i]
@@ -171,6 +184,7 @@ function Game:updateEffects(dt)
     end
 end
 
+-- Updates the game once per frame based on the current state.
 function Game:update()
     local nowMs = playdate.getCurrentTimeMilliseconds()
     local dt = clamp((nowMs - self.lastMs) / 1000, 0, 0.1)
@@ -215,6 +229,7 @@ function Game:update()
     end
 end
 
+-- Draws the mole body, face, and direction marker at its animated position.
 function Game:drawMole()
     local x = self.visualX
     local y = self.visualY - self.cameraY
@@ -240,6 +255,7 @@ function Game:drawMole()
     end
 end
 
+-- Draws temporary floating text and dirt particles.
 function Game:drawEffects()
     gfx.setColor(gfx.kColorBlack)
     for _, effect in ipairs(self.effects) do
@@ -258,6 +274,7 @@ function Game:drawEffects()
     end
 end
 
+-- Draws the score, timer, and depth across the top of the screen.
 function Game:drawHud()
     gfx.setColor(gfx.kColorBlack)
     gfx.fillRect(0, 0, 400, 27)
@@ -271,6 +288,7 @@ function Game:drawHud()
     end
 end
 
+-- Draws the title screen shown before the round starts.
 function Game:drawTitle()
     gfx.setColor(gfx.kColorWhite)
     gfx.fillRect(48, 44, 304, 151)
@@ -293,6 +311,7 @@ function Game:drawTitle()
     centerText("PRESS A OR A DIRECTION", 176)
 end
 
+-- Draws the final score screen after the timer reaches zero.
 function Game:drawGameOver()
     gfx.setColor(gfx.kColorWhite)
     gfx.fillRoundRect(65, 52, 270, 145, 8)
@@ -306,6 +325,7 @@ function Game:drawGameOver()
     centerText("PRESS A OR DOWN TO RESTART", 164)
 end
 
+-- Draws the world first, then overlays the correct game screen elements.
 function Game:draw()
     self.world:draw(self.cameraY)
 
@@ -321,4 +341,8 @@ function Game:draw()
     if self.state == "gameOver" then
         self:drawGameOver()
     end
+
+
+
+
 end
