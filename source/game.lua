@@ -16,19 +16,30 @@ local MOLE_SIDE_Y_OFFSET = -5
 local MOVE_SPEED_DURATION = 10
 local MOVE_SPEED_MULTIPLIER = 1.5
 local NORMAL_CRANK_THRESHOLD = 10
+local CRANK_PROMPT_TEXT = "CRANK!"
+local CRANK_PROMPT_CENTER_Y = 22
+local CRANK_PROMPT_MIN_SCALE = 1
+local CRANK_PROMPT_MAX_SCALE = 1.4
+local CRANK_PROMPT_PULSE_MS = 45
+local crankPromptImage = assert(gfx.imageWithText(CRANK_PROMPT_TEXT, 80, 20))
+local crankPromptWidth, crankPromptHeight = crankPromptImage:getSize()
 
+-- Builds a stable lookup key for anything stored at a world grid cell.
 local function worldCellKey(col, row)
     return col .. ":" .. row
 end
 
+-- Restricts a number so it stays within the requested minimum and maximum.
 local function clamp(value, low, high)
     return math.max(low, math.min(high, value))
 end
 
+-- Smooths movement animation so it slows gently as it reaches the target tile.
 local function easeOut(t)
     return 1 - (1 - t) * (1 - t)
 end
 
+-- Draws an image centered on a point while applying scale and vertical offset.
 local function drawImageCenteredScaled(image, x, y, scale, yOffset)
     local width, height = image:getSize()
     local drawX = math.floor(x - width * scale / 2)
@@ -40,16 +51,29 @@ local function drawImageCenteredScaled(image, x, y, scale, yOffset)
     end
 end
 
+-- Draws text centered horizontally on the Playdate screen.
 local function centerText(text, y)
     local width = gfx.getTextSize(text)
     gfx.drawText(text, 200 - width / 2, y)
 end
 
+-- Draws text so its right edge lines up with the requested x position.
 local function rightText(text, rightX, y)
     local width = gfx.getTextSize(text)
     gfx.drawText(text, rightX - width, y)
 end
 
+-- Draws the combat prompt centered in the HUD while pulsing its size for urgency.
+local function drawCrankPrompt()
+    local pulse = (math.sin(playdate.getCurrentTimeMilliseconds() / CRANK_PROMPT_PULSE_MS) + 1) / 2
+    local scale = CRANK_PROMPT_MIN_SCALE
+        + (CRANK_PROMPT_MAX_SCALE - CRANK_PROMPT_MIN_SCALE) * pulse
+    local x = math.floor(200 - crankPromptWidth * scale / 2)
+    local y = math.floor(CRANK_PROMPT_CENTER_Y - crankPromptHeight * scale / 2)
+    crankPromptImage:drawScaled(x, y, scale)
+end
+
+-- Creates a new game controller with world, audio, save data, and title state.
 function Game.new()
     local self = setmetatable({}, Game)
     self.audio = Audio.new()
@@ -66,6 +90,7 @@ function Game.new()
     return self
 end
 
+-- Saves a new high score when the current run beats the stored best score.
 function Game:saveHighScore()
     if self.score <= self.highScore then
         return
@@ -75,6 +100,7 @@ function Game:saveHighScore()
     playdate.datastore.write({ highScore = self.highScore }, "save")
 end
 
+-- Starts or restarts a run by resetting player, timer, camera, buffs, and world state.
 function Game:start()
     self.world:reset()
     self.state = "playing"
@@ -104,6 +130,7 @@ function Game:start()
     self.lastMs = playdate.getCurrentTimeMilliseconds()
 end
 
+-- Adds a floating text effect at a grid cell for pickups, damage, and rewards.
 function Game:addEffect(text, col, row)
     table.insert(self.effects, {
         text = text,
@@ -113,6 +140,7 @@ function Game:addEffect(text, col, row)
     })
 end
 
+-- Spawns small dirt particles around a newly dug grid cell.
 function Game:addDigParticles(col, row)
     local cx = (col - 0.5) * World.TILE
     local cy = (row - 0.5) * World.TILE
@@ -128,6 +156,7 @@ function Game:addDigParticles(col, row)
     end
 end
 
+-- Collects an item under the player and applies its score, time, or buff effect.
 function Game:collectAtPlayer()
     local item = self.world:collect(self.col, self.row)
     if not item then
@@ -160,6 +189,7 @@ function Game:collectAtPlayer()
     end
 end
 
+-- Detects whether the player is standing on an enemy and starts combat if needed.
 function Game:checkEnemyCollision()
     for _, enemy in ipairs(self.world.enemies) do
         if enemy.col == self.col and enemy.row == self.row then
@@ -171,6 +201,7 @@ function Game:checkEnemyCollision()
     return false
 end
 
+-- Removes a defeated enemy, awards points, drops loot, and exits combat state.
 function Game:killEnemy(enemy)
     for i = #self.world.enemies, 1, -1 do
         if self.world.enemies[i] == enemy then
@@ -197,6 +228,7 @@ function Game:killEnemy(enemy)
     self.nextMoveMs = 0
 end
 
+-- Handles crank-based combat damage while the player is touching an enemy.
 function Game:updateCombat()
     local enemy = self.combatEnemy
     if not enemy then
@@ -215,6 +247,7 @@ function Game:updateCombat()
     end
 end
 
+-- Attempts to move the player by one grid cell and handles digging, pickups, and collisions.
 function Game:tryMove(deltaCol, deltaRow, direction, nowMs)
     if self.moveProgress < 1 then
         return
@@ -254,6 +287,7 @@ function Game:tryMove(deltaCol, deltaRow, direction, nowMs)
     self:checkEnemyCollision()
 end
 
+-- Updates movement animation and reads held or newly pressed direction buttons.
 function Game:updateMovement(dt, nowMs)
     if self.moveProgress < 1 then
         local moveDuration = self.currentMoveDuration or MOVE_DURATION
@@ -281,6 +315,7 @@ function Game:updateMovement(dt, nowMs)
     end
 end
 
+-- Counts down temporary speed and strength buffs and clears them when they expire.
 function Game:updateBuffs(dt)
     if self.moveSpeedBuff > 0 then
         self.moveSpeedBuff = math.max(0, self.moveSpeedBuff - dt)
@@ -294,6 +329,7 @@ function Game:updateBuffs(dt)
     end
 end
 
+-- Advances floating text and dirt particles, removing them after their lifetime ends.
 function Game:updateEffects(dt)
     for i = #self.effects, 1, -1 do
         local effect = self.effects[i]
@@ -315,6 +351,7 @@ function Game:updateEffects(dt)
     end
 end
 
+-- Advances all game state for the current frame, including title, play, and game-over flow.
 function Game:update()
     local nowMs = playdate.getCurrentTimeMilliseconds()
     local dt = clamp((nowMs - self.lastMs) / 1000, 0, 0.1)
@@ -366,6 +403,7 @@ function Game:update()
     end
 end
 
+-- Draws the mole with the correct animation frames for movement and facing direction.
 function Game:drawMole()
     local x = self.visualX
     local y = self.visualY - self.cameraY
@@ -401,6 +439,7 @@ function Game:drawMole()
     )
 end
 
+-- Draws floating text popups and short-lived dirt particles.
 function Game:drawEffects()
     gfx.setColor(gfx.kColorBlack)
     for _, effect in ipairs(self.effects) do
@@ -419,6 +458,7 @@ function Game:drawEffects()
     end
 end
 
+-- Draws the score, timer, depth, high score, combat prompt, and active buff indicators.
 function Game:drawHud()
     gfx.setColor(gfx.kColorBlack)
     gfx.fillRect(0, 0, 400, 43)
@@ -428,7 +468,7 @@ function Game:drawHud()
     gfx.drawText("TIME " .. string.format("%02d", math.ceil(self.timeLeft)), 8, 23)
     rightText("DEPTH " .. tostring(self.maxDepth) .. "m", 392, 23)
     if self.combatEnemy then
-        centerText("CRANK!", 23)
+        drawCrankPrompt()
     end
     gfx.setImageDrawMode(gfx.kDrawModeCopy)
 
@@ -460,6 +500,7 @@ function Game:drawHud()
     end
 end
 
+-- Draws the title screen panel and animated mole prompt.
 function Game:drawTitle()
     gfx.setColor(gfx.kColorWhite)
     gfx.fillRect(48, 44, 304, 151)
@@ -486,6 +527,7 @@ function Game:drawTitle()
     centerText("PRESS A OR A DIRECTION", 169)
 end
 
+-- Draws the end-of-run summary and restart prompt.
 function Game:drawGameOver()
     gfx.setColor(gfx.kColorWhite)
     gfx.fillRoundRect(65, 52, 270, 145, 8)
@@ -500,6 +542,7 @@ function Game:drawGameOver()
     centerText("PRESS A OR DOWN TO RESTART", 170)
 end
 
+-- Draws the world and the appropriate title, gameplay, or game-over overlays.
 function Game:draw()
     self.world:draw(self.cameraY)
 

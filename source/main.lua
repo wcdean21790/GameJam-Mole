@@ -11,6 +11,7 @@ local game = Game.new()
 
 playdate.display.setRefreshRate(30)
 
+-- Runs one Playdate frame by updating game state and then drawing the screen.
 function playdate.update()
     game:update()
     game:draw()

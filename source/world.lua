@@ -20,16 +20,19 @@ local chunkRolePatterns = {
     { "treasure", "treasure", "worm", "treasure", "treasure" },
 }
 
+-- Builds a stable lookup key for storing world data by grid cell.
 local function cellKey(col, row)
     return col .. ":" .. row
 end
 
+-- Creates a new world and fills the starting area.
 function World.new()
     local self = setmetatable({}, World)
     self:reset()
     return self
 end
 
+-- Clears generated world state and prepares the first visible rows.
 function World:reset()
     self.dug = {}
     self.items = {}
@@ -40,6 +43,7 @@ function World:reset()
     self:ensureThroughRow(40)
 end
 
+-- Creates a treasure item for the given depth chunk, with deeper chunks improving rewards.
 function World:makeTreasure(chunkIndex)
     local roll = math.random()
     local diamondChance = math.min(0.08 + chunkIndex * 0.012, 0.30)
@@ -52,6 +56,7 @@ function World:makeTreasure(chunkIndex)
     return { kind = "gem", value = 10, label = "+10" }
 end
 
+-- Creates a worm time bonus for the given depth chunk.
 function World:makeWorm(chunkIndex)
     local roll = math.random()
     if chunkIndex >= 6 and roll < 0.16 then
@@ -62,6 +67,7 @@ function World:makeWorm(chunkIndex)
     return { kind = "worm", seconds = 2, label = "+2s" }
 end
 
+-- Chooses the item an enemy may drop after being defeated.
 function World:makeEnemyDrop(enemy)
     local chunkIndex = enemy.chunkIndex or 1
     local depth = (chunkIndex - 1) * CHUNK_HEIGHT
@@ -101,6 +107,7 @@ function World:makeEnemyDrop(enemy)
     }
 end
 
+-- Returns how many enemies should spawn in a chunk based on depth.
 local function enemiesForChunk(chunkIndex)
     if chunkIndex <= 5 then
         return 1
@@ -116,10 +123,12 @@ local function enemiesForChunk(chunkIndex)
     return MAX_ENEMIES_PER_CHUNK
 end
 
+-- Returns how quickly enemies move, increasing their pace in deeper chunks.
 local function enemyMoveInterval(chunkIndex)
     return math.max(0.40, 0.70 - (chunkIndex - 1) * 0.01)
 end
 
+-- Creates one roaming enemy in an unoccupied cell near the requested chunk.
 function World:makeEnemy(chunkIndex, occupiedCells)
     local baseRow = 3 + (chunkIndex - 1) * CHUNK_HEIGHT
     local minRow = math.max(3, baseRow - CHUNK_HEIGHT)
@@ -175,6 +184,7 @@ function World:makeEnemy(chunkIndex, occupiedCells)
     }
 end
 
+-- Updates roaming enemies by counting down their timers and stepping them around the map.
 function World:updateEnemies(dt)
     for _, enemy in ipairs(self.enemies) do
         if enemy.state ~= "combat" then
@@ -213,6 +223,7 @@ function World:updateEnemies(dt)
     end
 end
 
+-- Reports whether an enemy currently occupies a grid cell.
 function World:hasEnemyAt(col, row)
     for _, enemy in ipairs(self.enemies) do
         if enemy.col == col and enemy.row == row then
@@ -222,6 +233,7 @@ function World:hasEnemyAt(col, row)
     return false
 end
 
+-- Generates the next chunk of underground cells, placing items and enemies.
 function World:generateChunk()
     self.chunkCount += 1
     local chunkIndex = self.chunkCount
@@ -256,20 +268,24 @@ function World:generateChunk()
     self.generatedBottom = baseRow + CHUNK_HEIGHT
 end
 
+-- Generates additional chunks until the requested row is available.
 function World:ensureThroughRow(row)
     while self.generatedBottom < row do
         self:generateChunk()
     end
 end
 
+-- Checks whether a grid cell is inside the playable underground bounds.
 function World:isInside(col, row)
     return col >= 1 and col <= COLS and row >= 3
 end
 
+-- Checks whether the player has already dug out a grid cell.
 function World:isDug(col, row)
     return self.dug[cellKey(col, row)] == true
 end
 
+-- Marks a grid cell as dug and extends generation ahead of the player when needed.
 function World:dig(col, row)
     local key = cellKey(col, row)
     if self.dug[key] then
@@ -280,6 +296,7 @@ function World:dig(col, row)
     return true
 end
 
+-- Removes and returns the item at a grid cell, if one exists.
 function World:collect(col, row)
     local key = cellKey(col, row)
     local item = self.items[key]
@@ -287,6 +304,7 @@ function World:collect(col, row)
     return item
 end
 
+-- Draws small deterministic dirt marks so filled tiles have visual texture.
 local function drawDirtTexture(col, row, x, y)
     gfx.setColor(gfx.kColorWhite)
     local seed = col * 17 + row * 31
@@ -297,6 +315,7 @@ local function drawDirtTexture(col, row, x, y)
     end
 end
 
+-- Draws gems, gold, and diamonds with special handling for dropped loot.
 local function drawTreasure(item, cx, cy)
     gfx.setColor(item.dropped and gfx.kColorBlack or gfx.kColorWhite)
     if item.kind == "gem" then
@@ -318,6 +337,7 @@ local function drawTreasure(item, cx, cy)
     end
 end
 
+-- Draws the animated worm pickup, inverting it when it was dropped by an enemy.
 local function drawWorm(item, cx, cy)
     local frameIndex = math.floor(playdate.getCurrentTimeMilliseconds() / 140) % 4 + 1
     if item.dropped then
@@ -327,6 +347,7 @@ local function drawWorm(item, cx, cy)
     gfx.setImageDrawMode(gfx.kDrawModeCopy)
 end
 
+-- Draws either the speed or strength power-up icon.
 local function drawPowerUp(item, cx, cy)
     gfx.setColor(item.dropped and gfx.kColorBlack or gfx.kColorWhite)
     if item.kind == "move_speed" then
@@ -347,6 +368,7 @@ local function drawPowerUp(item, cx, cy)
     end
 end
 
+-- Draws an enemy sprite facing its current movement direction.
 local function drawEnemy(enemy, cx, cy, inTunnel)
     local frameIndex = math.floor(playdate.getCurrentTimeMilliseconds() / 140) % 3 + 1
     local image = enemyFrames:getImage(frameIndex)
@@ -365,6 +387,7 @@ local function drawEnemy(enemy, cx, cy, inTunnel)
     gfx.setImageDrawMode(gfx.kDrawModeCopy)
 end
 
+-- Draws the visible world tiles, items, enemies, surface line, and enemy health bars.
 function World:draw(cameraY)
     local firstRow = math.max(1, math.floor(cameraY / TILE) + 1)
     local lastRow = firstRow + 13
