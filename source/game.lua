@@ -322,11 +322,11 @@ function Game:update()
     self.titleBob += dt
 
     if self.state == "title" then
-        if playdate.buttonJustPressed(playdate.kButtonA)
-            or playdate.buttonJustPressed(playdate.kButtonLeft)
+        if playdate.buttonJustPressed(playdate.kButtonLeft)
             or playdate.buttonJustPressed(playdate.kButtonRight)
             or playdate.buttonJustPressed(playdate.kButtonDown) then
             self:start()
+            self:updateMovement(dt, nowMs)
         end
         return
     end
