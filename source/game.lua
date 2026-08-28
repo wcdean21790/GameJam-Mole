@@ -23,6 +23,29 @@ local CRANK_PROMPT_MAX_SCALE = 1.4
 local CRANK_PROMPT_PULSE_MS = 45
 local crankPromptImage = assert(gfx.imageWithText(CRANK_PROMPT_TEXT, 80, 20))
 local crankPromptWidth, crankPromptHeight = crankPromptImage:getSize()
+local TIMER_WARNING_SECONDS = 5
+local TIMER_TEXT_X = 8
+local TIMER_TEXT_Y = 23
+local TIMER_WARNING_BOX_X = 3
+local TIMER_WARNING_BOX_Y = 20
+local TIMER_WARNING_BOX_WIDTH = 88
+local TIMER_WARNING_BOX_HEIGHT = 20
+local TIMER_TEXT_CENTER_Y = TIMER_WARNING_BOX_Y + TIMER_WARNING_BOX_HEIGHT / 2
+local TIMER_TEXT_MIN_SCALE = 0.72
+local TIMER_TEXT_MAX_SCALE = 1
+local TIMER_TEXT_PULSE_MS = 55
+local timerWarningImages = {}
+
+for seconds = 0, TIMER_WARNING_SECONDS do
+    local text = "TIME " .. string.format("%02d", seconds)
+    local image = assert(gfx.imageWithText(text, 90, 20))
+    local width, height = image:getSize()
+    timerWarningImages[seconds] = {
+        image = image,
+        width = width,
+        height = height,
+    }
+end
 
 -- Builds a stable lookup key for anything stored at a world grid cell.
 local function worldCellKey(col, row)
@@ -73,6 +96,24 @@ local function drawCrankPrompt()
     crankPromptImage:drawScaled(x, y, scale)
 end
 
+-- Draws the timer normally, then switches to a pulsing warning style at five seconds.
+local function drawTimer(timeLeft)
+    local seconds = math.ceil(timeLeft)
+    if seconds > TIMER_WARNING_SECONDS then
+        gfx.drawText("TIME " .. string.format("%02d", seconds), TIMER_TEXT_X, TIMER_TEXT_Y)
+        return
+    end
+
+    seconds = clamp(seconds, 0, TIMER_WARNING_SECONDS)
+    local timerImage = timerWarningImages[seconds]
+    local pulse = (math.sin(playdate.getCurrentTimeMilliseconds() / TIMER_TEXT_PULSE_MS) + 1) / 2
+    local scale = TIMER_TEXT_MAX_SCALE
+        - (TIMER_TEXT_MAX_SCALE - TIMER_TEXT_MIN_SCALE) * pulse
+    local x = math.floor(TIMER_TEXT_X + timerImage.width / 2 - timerImage.width * scale / 2)
+    local y = math.floor(TIMER_TEXT_CENTER_Y - timerImage.height * scale / 2)
+    timerImage.image:drawScaled(x, y, scale)
+end
+
 -- Creates a new game controller with world, audio, save data, and title state.
 function Game.new()
     local self = setmetatable({}, Game)
@@ -87,6 +128,7 @@ function Game.new()
     self.particles = {}
     self.combatEnemy = nil
     self.cameraY = 0
+    self.audio:playMenuMusic()
     return self
 end
 
@@ -104,6 +146,7 @@ end
 function Game:start()
     self.world:reset()
     self.state = "playing"
+    self.audio:playGameMusic()
     self.score = 0
     self.timeLeft = START_TIME
     self.maxDepth = 0
@@ -195,6 +238,7 @@ function Game:checkEnemyCollision()
         if enemy.col == self.col and enemy.row == self.row then
             self.combatEnemy = enemy
             enemy.state = "combat"
+            self.audio:enemyEncounter()
             return true
         end
     end
@@ -276,10 +320,10 @@ function Game:tryMove(deltaCol, deltaRow, direction, nowMs)
     self.moveProgress = 0
     self.currentMoveDuration = moveDuration
     self.nextMoveMs = nowMs + moveRepeat
+    self.audio:move()
 
     if self.world:dig(self.col, self.row) then
         self:addDigParticles(self.col, self.row)
-        self.audio:dig()
     end
 
     self.maxDepth = math.max(self.maxDepth, self.row - 3)
@@ -399,7 +443,9 @@ function Game:update()
     if self.timeLeft <= 0 then
         self:saveHighScore()
         self.state = "gameOver"
+        self.audio:stopMusic()
         self.audio:gameOver()
+        self.audio:playMenuMusic()
     end
 end
 
@@ -465,17 +511,22 @@ function Game:drawHud()
     gfx.setImageDrawMode(gfx.kDrawModeFillWhite)
     gfx.drawText("SCORE " .. tostring(self.score), 8, 6)
     rightText("HIGH SCORE " .. tostring(self.highScore), 392, 6)
-    gfx.drawText("TIME " .. string.format("%02d", math.ceil(self.timeLeft)), 8, 23)
+    if self.timeLeft <= TIMER_WARNING_SECONDS
+        and math.floor(self.timeLeft * 5) % 2 == 0 then
+        gfx.setColor(gfx.kColorWhite)
+        gfx.drawRect(
+            TIMER_WARNING_BOX_X,
+            TIMER_WARNING_BOX_Y,
+            TIMER_WARNING_BOX_WIDTH,
+            TIMER_WARNING_BOX_HEIGHT
+        )
+    end
+    drawTimer(self.timeLeft)
     rightText("DEPTH " .. tostring(self.maxDepth) .. "m", 392, 23)
     if self.combatEnemy then
         drawCrankPrompt()
     end
     gfx.setImageDrawMode(gfx.kDrawModeCopy)
-
-    if self.timeLeft <= 5 and math.floor(self.timeLeft * 5) % 2 == 0 then
-        gfx.setColor(gfx.kColorWhite)
-        gfx.drawRect(3, 20, 88, 20)
-    end
 
     local buffY = 46
     if self.moveSpeedBuff > 0 then

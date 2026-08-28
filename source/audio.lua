@@ -1,59 +1,195 @@
 Audio = {}
 Audio.__index = Audio
 
--- Creates the audio manager and prepares the synth voices used for effects.
+local MUSIC_VOLUME = 0.28
+local SFX_VOLUME = 1
+local SFX_POOL_SIZE = 4
+local DIG_SOUND_END_SECONDS = 0.18
+
+local MUSIC_TRACKS = {
+    menu = "audio/Music_Opening_2",
+    playing = "audio/Music_Play4",
+}
+
+local SOUND_EFFECTS = {
+    gameOver = "audio/Sound_GameOver_1",
+    move = "audio/Sound_Move_2",
+    negative = "audio/Sound_Negative_1",
+    positive = "audio/Sound_Positive_1",
+    strongPositive = "audio/Sound_Positive_2",
+}
+
+-- Creates several players for one sound so repeated events can retrigger quickly.
+local function makeSoundPool(path, playRange)
+    local pool = {}
+    for _ = 1, SFX_POOL_SIZE do
+        local player = playdate.sound.sampleplayer.new(path)
+        if player then
+            if playRange then
+                player:setPlayRange(playRange.start, playRange.finish)
+            end
+            table.insert(pool, player)
+        end
+    end
+    return pool
+end
+
+-- Creates the audio manager and loads music tracks and event sound effects.
 function Audio.new()
     local self = setmetatable({}, Audio)
-    self.lead = playdate.sound.synth.new(playdate.sound.kWaveSquare)
-    self.bass = playdate.sound.synth.new(playdate.sound.kWaveTriangle)
     self.enabled = true
+    self.currentMusicName = nil
+    self.soundIndexes = {}
+    self.music = {
+        menu = playdate.sound.fileplayer.new(MUSIC_TRACKS.menu),
+        playing = playdate.sound.fileplayer.new(MUSIC_TRACKS.playing),
+    }
+    self.sounds = {
+        gameOver = makeSoundPool(SOUND_EFFECTS.gameOver),
+        move = makeSoundPool(SOUND_EFFECTS.move, {
+            start = 0,
+            finish = DIG_SOUND_END_SECONDS,
+        }),
+        negative = makeSoundPool(SOUND_EFFECTS.negative),
+        positive = makeSoundPool(SOUND_EFFECTS.positive),
+        strongPositive = makeSoundPool(SOUND_EFFECTS.strongPositive),
+    }
+
+    for _, player in pairs(self.music) do
+        if player then
+            player:setVolume(MUSIC_VOLUME)
+            player:setStopOnUnderrun(false)
+        end
+    end
+
+    for name, pool in pairs(self.sounds) do
+        self.soundIndexes[name] = 1
+        for _, player in ipairs(pool) do
+            player:setVolume(SFX_VOLUME, SFX_VOLUME)
+        end
+    end
+
     return self
 end
 
--- Plays a note when audio is enabled and the requested synth is available.
-function Audio:note(synth, pitch, volume, duration)
-    if self.enabled and synth then
-        synth:playNote(pitch, volume, duration)
+-- Plays a loaded sound effect if audio is enabled.
+function Audio:playSound(name)
+    if not self.enabled then
+        return
+    end
+
+    local pool = self.sounds[name]
+    if not pool or #pool == 0 then
+        return
+    end
+
+    local index = self.soundIndexes[name] or 1
+    local player = pool[index]
+    self.soundIndexes[name] = index % #pool + 1
+
+    if player then
+        player:stop()
+        player:setOffset(0)
+        player:play()
     end
 end
 
--- Plays the short low sound used when the mole digs a tile.
+-- Switches to a looping music track, stopping the previous track first.
+function Audio:playMusic(name)
+    if not self.enabled then
+        return
+    end
+
+    local nextMusic = self.music[name]
+    if not nextMusic then
+        self.currentMusicName = nil
+        return
+    end
+
+    if self.currentMusicName == name and nextMusic:isPlaying() then
+        return
+    end
+
+    local currentMusic = self.music[self.currentMusicName]
+    if currentMusic and currentMusic ~= nextMusic then
+        currentMusic:stop()
+    end
+
+    nextMusic:stop()
+    nextMusic:setOffset(0)
+    nextMusic:play(0)
+    self.currentMusicName = name
+end
+
+-- Starts the looping opening and main menu music.
+function Audio:playMenuMusic()
+    self:playMusic("menu")
+end
+
+-- Starts the looping gameplay music.
+function Audio:playGameMusic()
+    self:playMusic("playing")
+end
+
+-- Stops whichever music track is currently playing.
+function Audio:stopMusic()
+    local currentMusic = self.music[self.currentMusicName]
+    if currentMusic then
+        currentMusic:stop()
+    end
+    self.currentMusicName = nil
+end
+
+-- Plays the short movement sound used when the mole changes grid cells.
+function Audio:move()
+    self:playSound("move")
+end
+
+-- Plays the movement sound when a new tile is dug.
 function Audio:dig()
-    self:note(self.bass, 35, 0.18, 0.04)
+    self:move()
 end
 
--- Plays a treasure pickup sound based on the type of treasure collected.
+-- Plays a pickup sound based on the type of treasure collected.
 function Audio:treasure(kind)
-    local pitch = ({ gem = 72, gold = 79, diamond = 88 })[kind] or 72
-    self:note(self.lead, pitch, 0.45, 0.12)
+    if kind == "diamond" or kind == "gold" then
+        self:playSound("strongPositive")
+    else
+        self:playSound("positive")
+    end
 end
 
--- Plays a worm pickup sound, with higher pitches for larger time bonuses.
+-- Plays the regular positive pickup sound when a worm adds time.
 function Audio:worm(seconds)
-    self:note(self.lead, seconds >= 10 and 84 or seconds >= 5 and 79 or 76, 0.4, 0.16)
+    self:playSound(seconds >= 5 and "strongPositive" or "positive")
 end
 
--- Plays the countdown warning beep as time runs low.
+-- Plays the negative alert sound as time runs low.
 function Audio:warning()
-    self:note(self.lead, 67, 0.28, 0.07)
+    self:playSound("negative")
 end
 
--- Plays the sound for a successful crank hit during enemy combat.
+-- Plays the negative sound when combat begins.
+function Audio:enemyEncounter()
+    self:playSound("negative")
+end
+
+-- Plays the negative impact sound for a successful crank hit during enemy combat.
 function Audio:combatHit()
-    self:note(self.lead, "C5", 0.35, 0.06)
+    self:playSound("negative")
 end
 
--- Plays the reward sound after an enemy is defeated.
+-- Plays the stronger positive sound after an enemy is defeated.
 function Audio:enemyDefeated()
-    self:note(self.lead, "G5", 0.5, 0.18)
+    self:playSound("strongPositive")
 end
 
--- Plays the sound for collecting a temporary power-up.
+-- Plays the stronger positive sound for collecting a temporary power-up.
 function Audio:powerUp()
-    self:note(self.lead, "C6", 0.45, 0.16)
+    self:playSound("strongPositive")
 end
 
--- Plays the longer low note used when the game ends.
+-- Plays the game-over sound.
 function Audio:gameOver()
-    self:note(self.bass, 40, 0.5, 0.35)
+    self:playSound("gameOver")
 end
