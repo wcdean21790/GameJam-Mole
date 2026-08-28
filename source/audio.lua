@@ -95,7 +95,7 @@ function Audio:playSound(name)
 end
 
 -- Switches to a looping music track, stopping the previous track first.
-function Audio:playMusic(name)
+function Audio:playMusic(name, forceRestart)
     if not self.enabled then
         return
     end
@@ -106,7 +106,7 @@ function Audio:playMusic(name)
         return
     end
 
-    if self.currentMusicName == name and nextMusic:isPlaying() then
+    if not forceRestart and self.currentMusicName == name and nextMusic:isPlaying() then
         return
     end
 
@@ -128,7 +128,7 @@ end
 
 -- Starts the looping gameplay music.
 function Audio:playGameMusic()
-    self:playMusic("playing")
+    self:playMusic("playing", true)
 end
 
 -- Stops whichever music track is currently playing.
